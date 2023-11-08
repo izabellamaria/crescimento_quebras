@@ -1,0 +1,300 @@
+dados <- read_excel("C:/Users/dados.xlsx")
+
+
+# Separando os dados em controle (até o dia 44) e tratamento (a partir do dia 45 até 181)
+dados <- dados %>% filter(dia <= 181) #filtrando os dados ate setembro
+
+dados_controle <- dados %>% filter(dia <= 44)
+dados_treinamento <- dados %>% filter(dia >= 45)
+
+#################### GOMPERTZ #################################
+
+# Parâmetros iniciais para ajustar o modelo Gompertz aos dados de controle
+p1 <- c(y0 = 14, mumax = 5, K = 8279)
+lower1 <- c(y0 = 0, mumax = 0, K = 1)
+upper1 <- c(y0 = 100, mumax = 7, K = 10000)
+
+# Ajustando o modelo Gompertz
+gompertz <- fit_growthmodel(FUN = grow_gompertz, p = p1, dados_controle$dia, dados_controle$obitos,
+                            lower = lower1, upper = upper1)
+
+# Parâmetros estimados para previsão com base nos dados de controle
+par_gompertz <- coef(gompertz)
+
+# Estimando o comportamento contrafactual após a intervenção no dia 44
+tempo <- seq(45,181)  # Dias após a intervenção
+prev_gomp_treino <- grow_gompertz(tempo, par_gompertz)
+
+
+# Criar o gráfico base com ajuste
+plot(dados$dia, dados$obitos, type = "l", col = "lightblue", lty = 1, lwd = 2,
+     xlab = "Dias corridos", ylab = "Óbitos acumulados", 
+     main = "Óbitos Observados e Previsão do Modelo Gompertz",
+     ylim = c(0, 10000))  # Ajustando o limite do eixo y até 10000
+lines(prev_gomp_treino, col = "darkgray", lty = 1, lwd = 2,
+      pch = 19, cex = 0.8, type = "l", 
+      xlim = c(min(dados$dia), max(dados$dia)), 
+      ylim = c(0, 10000))
+abline(v = 45, col = "seagreen", lty = 2)# Estimando o comportamento contrafactual de toda a serie 
+
+
+#PARA CALCULAR AS QUEBRAS
+tempo_total <- seq(1, 181)  #TODOS OS DIAS OBSERVADOS
+prev_gomp_total <- grow_gompertz(tempo_total, par_gompertz)
+
+
+# Calcular a diferença entre os valores observados e as previsões 
+diferenca_gomp <- dados$obitos -  prev_gomp_total
+
+# Exibir a diferença
+mean(diferenca_gomp)
+
+#Desvio-padrao das previsoes
+dp_gomp <- sd(prev_gomp_treino)
+
+razao <- mean(diferenca_gomp) / dp_gomp
+
+
+# Criar um gráfico CUSUM
+cusum_plot_gomp <- cusum(diferenca_gomp, decision.interval = 15, se.shift = 0)
+plot(cusum_plot_gomp, main = "Gráfico CUSUM para Detecção de Mudanças")
+
+plot(cusum_plot_gomp, add.stats = FALSE, chart.all = FALSE, 
+     label.bounds = c("INF", "SUP"), title ="Soma cumulativa Gompertz", xlab = "Dias", ylab = "CUSUM", 
+     axes.las = 1, digits =  getOption("digits"),
+     restore.par = TRUE, type = "xbar.one", head.start = 3)
+
+y_gomp <- prev_gomp_treino[,c(2)] #deixando so a previsao
+
+# Calcular a média e o desvio padrão do grupo de controle
+media_controle_gomp <- mean(y_gomp)
+dp_controle_gomp <- sd(y_gomp)
+
+# Calcular a média e o desvio padrão do grupo de tratamento
+media_tratamento <- mean(dados_treinamento$obitos)
+desvio_padrao_tratamento <- sd(dados_treinamento$obitos)
+
+# Calcular o tamanho de efeito Cohen's d
+n_controle_gomp <- length(y_gomp)
+n_tratamento <- length(dados_treinamento$obitos)
+
+pooled_dp_gomp <- sqrt(((n_controle_gomp - 1) * dp_controle_gomp^2 + (n_tratamento - 1) * desvio_padrao_tratamento^2) / (n_controle_gomp + n_tratamento - 2))
+
+cohen_d_gomp <- (media_controle_gomp - media_tratamento) / pooled_dp_gomp
+
+# Exibir o valor de Cohen's d
+cohen_d_gomp
+
+# Criação de um gráfico de Cohen's d
+#barplot(cohen_d_gomp, names.arg = c("Cohen's d"), col = "blue", ylim = c(-1, 1), ylab = "Cohen's d", main = "Tamanho do Efeito - Cohen's d")
+#abline(h = 0, col = "red", lty = 2)
+
+
+
+#Richards
+
+# Definindo os parâmetros iniciais, limites inferior e superior
+p2 <- c(y0 = 14, mumax = 0.8, K = 8279, beta = 3)
+lower2 <- c(y0 = 1, mumax = 0, K = 1, beta = 0)
+upper2 <- c(y0 = 100, mumax = 30, K = 10000, beta = 6)
+
+# Ajustando o modelo Richards
+richards <- fit_growthmodel(FUN = grow_richards, p = p2, dados_controle$dia, dados_controle$obitos,
+                            lower = lower2, upper = upper2)
+# Parâmetros estimados para previsão com base nos dados de controle
+controle_rich <- coef(richards)
+
+# Estimando o comportamento contrafactual após a intervenção no dia 44
+prev_rich_treino <- grow_richards(tempo, controle_rich)
+
+# Criar o gráfico base com ajuste
+plot(dados$dia, dados$obitos, type = "l", col = "lightblue", lty = 1, lwd = 2,
+     xlab = "Dias corridos", ylab = "Óbitos acumulados", 
+     main = "Óbitos Observados e Previsão do Modelo Richards",
+     ylim = c(0, 10000))  # Ajustando o limite do eixo y até 10000
+lines(prev_rich_treino, col = "darkgray", lty = 1, lwd = 2,
+      pch = 19, cex = 0.8, type = "l", 
+      xlim = c(min(dados$dia), max(dados$dia)), 
+      ylim = c(0, 10000))
+abline(v = 45, col = "seagreen", lty = 2)# Estimando o comportamento contrafactual de toda a serie 
+lines(tempo_total, diferenca_rich, col = "green", pch = 18)
+
+
+#PARA CALCULAR AS QUEBRAS
+tempo_total <- seq(1, 181)  #TODOS OS DIAS OBSERVADOS
+prev_rich_total <- grow_richards(tempo_total, controle_rich)
+
+
+# Calcular a diferença entre os valores observados e as previsões 
+diferenca_rich <- dados$obitos -  prev_rich_total
+
+# Exibir a diferença
+mean(diferenca_rich)
+
+#Desvio-padrao das previsoes
+dp_rich <- sd(prev_rich_treino)
+
+razao_rich <- mean(diferenca_rich) / dp_rich
+
+
+# Criar um gráfico CUSUM
+cusum_plot_rich <- cusum(diferenca_rich, decision.interval = 15, se.shift = 0)
+plot(cusum_plot_rich, main = "Gráfico CUSUM para Detecção de Mudanças")
+
+plot(cusum_plot_rich, add.stats = FALSE, chart.all = FALSE, 
+     label.bounds = c("INF", "SUP"), title ="Soma cumulativa Richards", xlab = "Dias", ylab = "CUSUM", 
+     axes.las = 1, digits =  getOption("digits"),
+     restore.par = TRUE, type = "xbar.one", head.start = 3)
+
+y_rich <- prev_rich_treino[,c(2)]
+
+# Calcular a média e o desvio padrão do grupo de controle
+media_controle_rich <- mean(y_rich)
+dp_controle_rich <- sd(y_rich)
+
+# Calcular a média e o desvio padrão do grupo de tratamento
+media_tratamento <- mean(dados_treinamento$obitos)
+desvio_padrao_tratamento <- sd(dados_treinamento$obitos)
+
+# Calcular o tamanho de efeito Cohen's d
+n_controle_rich <- length(y_rich)
+n_tratamento <- length(dados_treinamento$obitos)
+
+pooled_dp_rich<- sqrt(((n_controle_rich - 1) * dp_controle_rich^2 + (n_tratamento - 1) * desvio_padrao_tratamento^2) / (n_controle_rich + n_tratamento - 2))
+
+cohen_d_rich <- (media_controle_rich - media_tratamento) / pooled_dp_rich
+
+# Exibir o valor de Cohen's d
+cohen_d_rich
+
+
+# Logistico
+
+p3 <- c(y0 = 14, mumax = 0.7, K = 8279)
+lower3 <- c(y0 = 10, mumax = 0.02, K = 8000)
+upper3 <- c(y0 = 80, mumax = 1, K = 12000)
+
+# Ajustando o modelo logístico
+logistico <- fit_growthmodel(FUN = grow_logistic, p = p3, dados_controle$dia, dados_controle$obitos,
+                             lower = lower3, upper = upper3)
+plot(logistico)
+
+# Parâmetros estimados para previsão com base nos dados de controle
+controle_log <- coef(logistico)
+
+# Estimando o comportamento contrafactual após a intervenção no dia 44
+tempo <- seq(45,181)  # Dias após a intervenção
+prev_log_treino <- grow_logistic(tempo, controle_log)
+
+
+# Primeiro, crie o gráfico de dispersão dos dados de óbitos
+plot(dados$dia, dados$obitos, type = "l", col = "lightblue", lty = 1, lwd = 2,
+     xlab = "Dias corridos", ylab = "Óbitos acumulados", 
+     main = "Óbitos Observados e Previsão do Modelo Logístico",
+     ylim = c(0, 10000))  # Ajustando o limite do eixo y até 10000
+lines(prev_log_treino, col = "darkgray", lty = 1, lwd = 2,
+      pch = 19, cex = 0.8, type = "l", 
+      xlim = c(min(dados$dia), max(dados$dia)), 
+      ylim = c(0, 10000))
+abline(v = 45, col = "seagreen", lty = 2)# Estimando o comportamento contrafactual de toda a serie 
+
+prev_log_total <- grow_logistic(tempo_total, controle_log)
+
+
+# Calcular a diferença entre os valores observados e as previsões 
+diferenca_log <- dados$obitos -  prev_log_total
+
+# Exibir a diferença
+mean(diferenca_log)
+
+#Desvio-padrao das previsoes
+dp_log <- sd(prev_log_treino)
+
+razao_log <- mean(diferenca_log) / dp_log
+
+
+# Criar um gráfico CUSUM
+cusum_plot_log <- cusum(diferenca_log, decision.interval = 15, se.shift = 0)
+plot(cusum_plot_log, main = "Gráfico CUSUM para Detecção de Mudanças")
+
+plot(cusum_plot_log, add.stats = FALSE, chart.all = FALSE, 
+     label.bounds = c("INF", "SUP"), title ="Soma cumulativa Logístico", xlab = "Dias", ylab = "CUSUM", 
+     axes.las = 1, digits =  getOption("digits"),
+     restore.par = TRUE, type = "xbar.one", head.start = 3)
+
+y_log <- prev_log_treino[,c(2)]
+
+# Calcular a média e o desvio padrão do grupo de controle
+media_controle_log <- mean(y_log)
+dp_controle_log <- sd(y_log)
+
+# Calcular a média e o desvio padrão do grupo de tratamento
+media_tratamento <- mean(dados_treinamento$obitos)
+desvio_padrao_tratamento <- sd(dados_treinamento$obitos)
+
+# Calcular o tamanho de efeito Cohen's d
+n_controle_log <- length(y_log)
+n_tratamento <- length(dados_treinamento$obitos)
+
+pooled_dp_log<- sqrt(((n_controle_log - 1) * dp_controle_log^2 + (n_tratamento - 1) * desvio_padrao_tratamento^2) / (n_controle_log + n_tratamento - 2))
+
+cohen_d_log <- (media_controle_log - media_tratamento) / pooled_dp_log
+
+# Exibir o valor de Cohen's d
+cohen_d_log
+
+
+
+##### MEDIDAS DE ERRO
+
+# Calcular as previsões do modelo Gompertz para os dados de treinamento
+prev_gomp_treino <- grow_gompertz(tempo, par_gompertz)
+
+# Calcular o MSE (Erro Quadrático Médio) para o modelo Gompertz
+mse_gompertz <- mean((dados_treinamento$obitos - prev_gomp_treino)^2)
+
+# Calcular o RMSE (Raiz Quadrada do Erro Quadrático Médio) para o modelo Gompertz
+rmse_gompertz <- sqrt(mse_gompertz)
+
+# Calcular o MAPE (Erro Percentual Médio Absoluto) para o modelo Gompertz
+mape_gompertz <- mean(abs((dados_treinamento$obitos - prev_gomp_treino) / dados_treinamento$obitos)) * 100
+
+# Exibir os resultados
+mse_gompertz
+rmse_gompertz
+mape_gompertz
+
+# Calcular as previsões do modelo Richards para os dados de treinamento
+prev_rich_treino <- grow_richards(tempo, controle_rich)
+
+# Calcular o MSE (Erro Quadrático Médio) para o modelo Richards
+mse_rich <- mean((dados_treinamento$obitos - prev_rich_treino)^2)
+
+# Calcular o RMSE (Raiz Quadrada do Erro Quadrático Médio) para o modelo Richards
+rmse_rich <- sqrt(mse_rich)
+
+# Calcular o MAPE (Erro Percentual Médio Absoluto) para o modelo Richards
+mape_rich <- mean(abs((dados_treinamento$obitos - prev_rich_treino) / dados_treinamento$obitos)) * 100
+
+# Exibir os resultados
+mse_rich
+rmse_rich
+mape_rich
+
+
+# Calcular as previsões do modelo Richards para os dados de treinamento
+prev_log_treino <- grow_logistic(tempo, controle_log)
+
+# Calcular o MSE (Erro Quadrático Médio) para o modelo Richards
+mse_log <- mean((dados_treinamento$obitos - prev_log_treino)^2)
+
+# Calcular o RMSE (Raiz Quadrada do Erro Quadrático Médio) para o modelo Richards
+rmse_log <- sqrt(mse_log)
+
+# Calcular o MAPE (Erro Percentual Médio Absoluto) para o modelo Richards
+mape_log <- mean(abs((dados_treinamento$obitos - prev_log_treino) / dados_treinamento$obitos)) * 100
+
+# Exibir os resultados
+mse_log
+rmse_log
+mape_log
